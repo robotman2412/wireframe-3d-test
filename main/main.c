@@ -9,6 +9,7 @@
 // native Badge apps on.
 
 #include "main.h"
+#include "wf3d.h"
 
 static pax_buf_t buf;
 xQueueHandle buttonQueue;
@@ -43,44 +44,71 @@ void app_main() {
     
     // Initialize graphics for the screen.
     pax_buf_init(&buf, NULL, 320, 240, PAX_BUF_16_565RGB);
+    pax_background(&buf, 0xff000000);
     
     // Initialize NVS.
     nvs_flash_init();
     
     // Initialize WiFi. This doesn't connect to Wifi yet.
     wifi_init();
+        
+    wf3d_ctx_t c3d;
+    wf3d_init(&c3d);
     
     while (1) {
-        // Pick a random background color.
-        int hue = esp_random() & 255;
-        pax_col_t col = pax_col_hsv(hue, 255 /*saturation*/, 255 /*brighness*/);
+        pax_background(&buf, 0);
         
-        // Greet the World in front of a random background color! 
-        // Fill the background with the random color.
-        pax_background(&buf, col);
+        // 3D unit CUBE test.
+        vec3f_t cube_vtx[] = {
+            // Front face
+            { -1, -1, -1 },
+            {  1, -1, -1 },
+            {  1,  1, -1 },
+            { -1,  1, -1 },
+            
+            // Back face
+            { -1, -1,  1 },
+            {  1, -1,  1 },
+            {  1,  1,  1 },
+            { -1,  1,  1 },
+        };
         
-        // This text is shown on screen.
-        char             *text = "Hello, MCH2022!";
+        size_t cube_lines[] = {
+            // Front face
+            0, 1,
+            1, 2,
+            2, 3,
+            3, 0,
+            
+            // Back face
+            4, 5,
+            5, 6,
+            6, 7,
+            7, 4,
+            
+            // Edge faces
+            0, 4,
+            1, 5,
+            2, 6,
+            3, 7,
+        };
         
-        // Pick the font (Saira is the only one that looks nice in this size).
-        const pax_font_t *font = pax_font_saira_condensed;
-
-        // Determine how the text dimensions so we can display it centered on
-        // screen.
-        pax_vec1_t        dims = pax_text_size(font, font->default_size, text);
-
-        // Draw the centered text.
-        pax_draw_text(
-            &buf, // Buffer to draw to.
-            0xff000000, // color
-            font, font->default_size, // Font and size to use.
-            // Position (top left corner) of the app.
-            (buf.width  - dims.x) / 2.0,
-            (buf.height - dims.y) / 2.0,
-            // The text to be rendered.
-            text
-        );
-
+        // Add the cube.
+        wf3d_lines(&c3d, 8, cube_vtx, 12, cube_lines);
+        wf3d_line(&c3d, (vec3f_t) {-1, -1, 0}, (vec3f_t) {1, 1, 0});
+        
+        // Make a camera matrix.
+        float a = esp_timer_get_time() % 10000000 / 10000000.0 * 2 * M_PI;
+        matrix_3d_t cam_mtx = 
+            // matrix_3d_multiply(matrix_3d_rotate_y(a), matrix_3d_translate(0, 0, 2));
+            matrix_3d_multiply(matrix_3d_translate(0, 0, 2), matrix_3d_rotate_y(a));
+            // matrix_3d_rotate_y(a);
+            // matrix_3d_translate(0, 0, 2);
+        
+        // Render 3D stuff.
+        wf3d_render2(&buf, 0xff00ffff, 0xffff0000, &c3d, cam_mtx);
+        wf3d_clear(&c3d);
+        
         // Draws the entire graphics buffer to the screen.
         disp_flush();
         
@@ -89,13 +117,12 @@ void app_main() {
         // Structure used to receive data.
         rp2040_input_message_t message;
         
-        // Wait forever for a button press (because of portMAX_DELAY)
-        xQueueReceive(buttonQueue, &message, portMAX_DELAY);
-        
-        // Which button is currently pressed?
-        if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
-            // If home is pressed, exit to launcher.
-            exit_to_launcher();
+        if (xQueueReceive(buttonQueue, &message, 0)) {
+            // Which button is currently pressed?
+            if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
+                // If home is pressed, exit to launcher.
+                exit_to_launcher();
+            }
         }
     }
 }

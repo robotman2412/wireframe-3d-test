@@ -6,15 +6,11 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 
 
 // A matrix used for 3D transformations.
 typedef union {
-	struct {
-		float a0, a1, a2, a3;
-		float b0, b1, b2, b3;
-		float c0, c1, c2, c3;
-	};
 	struct {
 		float xx, yx, zx, dx;
 		float xy, yy, zy, dy;
@@ -49,12 +45,20 @@ static inline matrix_3d_t matrix_3d_translate(float x, float y, float z) {
 		0, 0, 1, z,
 	}};
 }
+// 3D rotation matrix: rotate around the X axis
+matrix_3d_t matrix_3d_rotate_x(float angle);
+// 3D rotation matrix: rotate around the Y axis
+matrix_3d_t matrix_3d_rotate_y(float angle);
+// 3D rotation matrix: rotate around the Z axis
+matrix_3d_t matrix_3d_rotate_z(float angle);
 
 // 3D matrix: applies the transformation that b represents on to a.
 matrix_3d_t matrix_3d_multiply (matrix_3d_t a, matrix_3d_t b);
 // 3D matrix: applies the transformation that a represents on to a point.
 void        matrix_3d_transform(matrix_3d_t a, float *x, float *y, float *z);
-
+// 3D matrix: matrix inversion, such that inverted multiplied by input (in any order) is identity.
+// Returns whether an inverse matrix was found.
+bool        matrix_3d_invert(matrix_3d_t *out_ptr, matrix_3d_t a);
 
 
 #ifdef __cplusplus
