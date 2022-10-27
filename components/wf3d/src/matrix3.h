@@ -20,6 +20,8 @@ typedef union {
 } matrix_3d_t;
 
 
+#include "wf3d.h"
+
 
 // 3D identity matrix: Represents no change
 static inline matrix_3d_t matrix_3d_identity() {
@@ -56,6 +58,8 @@ matrix_3d_t matrix_3d_rotate_z(float angle);
 matrix_3d_t matrix_3d_multiply (matrix_3d_t a, matrix_3d_t b);
 // 3D matrix: applies the transformation that a represents on to a point.
 void        matrix_3d_transform(matrix_3d_t a, float *x, float *y, float *z);
+// 3D matrix: applies the transformation that a represents on to a point.
+vec3f_t     matrix_3d_transform_inline(matrix_3d_t a, vec3f_t vec);
 // 3D matrix: matrix inversion, such that inverted multiplied by input (in any order) is identity.
 // Returns whether an inverse matrix was found.
 bool        matrix_3d_invert(matrix_3d_t *out_ptr, matrix_3d_t a);

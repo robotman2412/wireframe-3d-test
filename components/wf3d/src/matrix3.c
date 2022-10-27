@@ -32,6 +32,18 @@ void matrix_3d_transform(matrix_3d_t a, float *x, float *y, float *z) {
 	*z = x0 * a.xz + y0 * a.yz + z0 * a.zz + a.dz;
 }
 
+// 3D matrix: applies the transformation that a represents on to a point.
+vec3f_t matrix_3d_transform_inline(matrix_3d_t a, vec3f_t vec) {
+	float x0 = vec.x;
+	float y0 = vec.y;
+	float z0 = vec.z;
+	return (vec3f_t) {
+		x0 * a.xx + y0 * a.yx + z0 * a.zx + a.dx,
+		x0 * a.xy + y0 * a.yy + z0 * a.zy + a.dy,
+		x0 * a.xz + y0 * a.yz + z0 * a.zz + a.dz,
+	};
+}
+
 // 3D rotation matrix: rotate around the X axis
 matrix_3d_t matrix_3d_rotate_x(float angle) {
 	float cos_res = cosf(-angle);

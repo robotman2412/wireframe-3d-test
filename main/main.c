@@ -55,6 +55,12 @@ void app_main() {
     wf3d_ctx_t c3d;
     wf3d_init(&c3d);
     
+    bool up = 0, down = 0, left = 0, right = 0;
+    
+    wf3d_shape_t *sphere = s3d_uv_sphere((vec3f_t){0, 0, 0}, 1, 5, 10);
+    
+    int mode = 1;
+    float eye_dist = 0.18;
     while (1) {
         pax_background(&buf, 0);
         
@@ -93,35 +99,75 @@ void app_main() {
             3, 7,
         };
         
-        // Add the cube.
-        wf3d_lines(&c3d, 8, cube_vtx, 12, cube_lines);
+        // Move around a bit.
+        wf3d_apply_3d(&c3d, matrix_3d_translate(0, 0, 2));
+        float a = esp_timer_get_time() % 30000000 / 10000000.0 * 2 * M_PI;
+        wf3d_apply_3d(&c3d, matrix_3d_rotate_y(a));
+        
+        // Sphere.
+        wf3d_push_3d (&c3d);
+        wf3d_apply_3d(&c3d, matrix_3d_translate(1, 1, 1));
+        wf3d_apply_3d(&c3d, matrix_3d_scale(0.25, 0.25, 0.25));
+        wf3d_apply_3d(&c3d, matrix_3d_rotate_z(a/3));
+        wf3d_lines   (&c3d, sphere->num_vertex, sphere->vertices, sphere->num_lines, sphere->indices);
+        wf3d_pop_3d  (&c3d);
+        
+        // Sphere 2!
+        wf3d_push_3d (&c3d);
+        wf3d_apply_3d(&c3d, matrix_3d_translate(-1, -1, -1));
+        wf3d_apply_3d(&c3d, matrix_3d_scale(0.25, 0.25, 0.25));
+        wf3d_apply_3d(&c3d, matrix_3d_rotate_z(a/3));
+        wf3d_lines   (&c3d, sphere->num_vertex, sphere->vertices, sphere->num_lines, sphere->indices);
+        wf3d_pop_3d  (&c3d);
+        
+        // Add the shapes.
         wf3d_line(&c3d, (vec3f_t) {-1, -1, 0}, (vec3f_t) {1, 1, 0});
+        wf3d_lines(&c3d, 8, cube_vtx, 12, cube_lines);
+        
+        if (left && !right) {
+            eye_dist /= 1.05;
+        } else if (right && !left) {
+            eye_dist *= 1.05;
+        }
         
         // Make a camera matrix.
-        float a = esp_timer_get_time() % 10000000 / 10000000.0 * 2 * M_PI;
         matrix_3d_t cam_mtx = 
+            matrix_3d_identity();
             // matrix_3d_multiply(matrix_3d_rotate_y(a), matrix_3d_translate(0, 0, 2));
-            matrix_3d_multiply(matrix_3d_translate(0, 0, 2), matrix_3d_rotate_y(a));
+            // matrix_3d_multiply(matrix_3d_translate(0, 0, 2), matrix_3d_rotate_y(a));
             // matrix_3d_rotate_y(a);
             // matrix_3d_translate(0, 0, 2);
         
         // Render 3D stuff.
-        wf3d_render2(&buf, 0xff00ffff, 0xffff0000, &c3d, cam_mtx);
+        if (mode == 1) wf3d_render2(&buf, 0xffff0000, 0xff00ffff, &c3d, cam_mtx, eye_dist); // Red, Cyan
+        if (mode == 2) wf3d_render2(&buf, 0xffff7f00, 0xff0000ff, &c3d, cam_mtx, eye_dist); // Orange, Blue
+        if (mode == 0) wf3d_render(&buf, 0xffffffff, &c3d, cam_mtx); // Regular projected 3D.
         wf3d_clear(&c3d);
         
         // Draws the entire graphics buffer to the screen.
         disp_flush();
         
-        // Wait for button presses and do another cycle.
-        
         // Structure used to receive data.
         rp2040_input_message_t message;
         
+        // Wait for button presses and do another cycle.
         if (xQueueReceive(buttonQueue, &message, 0)) {
             // Which button is currently pressed?
             if (message.input == RP2040_INPUT_BUTTON_HOME && message.state) {
                 // If home is pressed, exit to launcher.
                 exit_to_launcher();
+            } else if (message.input == RP2040_INPUT_BUTTON_ACCEPT && message.state) {
+                // Cycle render mode.
+                mode ++;
+                mode %= 3;
+            } else if (message.input == RP2040_INPUT_JOYSTICK_UP) {
+                up    = message.state;
+            } else if (message.input == RP2040_INPUT_JOYSTICK_DOWN) {
+                down  = message.state;
+            } else if (message.input == RP2040_INPUT_JOYSTICK_LEFT) {
+                left  = message.state;
+            } else if (message.input == RP2040_INPUT_JOYSTICK_RIGHT) {
+                right = message.state;
             }
         }
     }
