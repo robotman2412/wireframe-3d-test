@@ -69,8 +69,8 @@ vec3f_t matrix_3d_transform_inline(matrix_3d_t a, vec3f_t vec) {
 
 // 3D rotation matrix: rotate around the X axis
 matrix_3d_t matrix_3d_rotate_x(float angle) {
-	float cos_res = cosf(-angle);
-	float sin_res = sinf(-angle);
+	float cos_res = cosf(angle);
+	float sin_res = sinf(angle);
 	return (matrix_3d_t) { .arr = {
 		1, 0,        0,       0,
 		0, cos_res, -sin_res, 0,
@@ -80,8 +80,8 @@ matrix_3d_t matrix_3d_rotate_x(float angle) {
 
 // 3D rotation matrix: rotate around the Y axis
 matrix_3d_t matrix_3d_rotate_y(float angle) {
-	float cos_res = cosf(-angle);
-	float sin_res = sinf(-angle);
+	float cos_res = cosf(angle);
+	float sin_res = sinf(angle);
 	return (matrix_3d_t) { .arr = {
 		cos_res, 0, -sin_res, 0,
 		0,       1,  0,       0,
@@ -91,8 +91,8 @@ matrix_3d_t matrix_3d_rotate_y(float angle) {
 
 // 3D rotation matrix: rotate around the Z axis
 matrix_3d_t matrix_3d_rotate_z(float angle) {
-	float cos_res = cosf(-angle);
-	float sin_res = sinf(-angle);
+	float cos_res = cosf(angle);
+	float sin_res = sinf(angle);
 	return (matrix_3d_t) { .arr = {
 		cos_res, -sin_res, 0, 0,
 		sin_res,  cos_res, 0, 0,

@@ -27,6 +27,7 @@
 
 #include "wf3d.h"
 
-wf3d_shape_t *decode_obj_str();
+// Decodes an .obj model file and makes a wireframe version of it.
+wf3d_shape_t *s3d_decode_obj(FILE *fd);
 
 #endif

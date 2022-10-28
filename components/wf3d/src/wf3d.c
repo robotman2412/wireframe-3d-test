@@ -51,12 +51,14 @@ void wf3d_init(wf3d_ctx_t *ctx) {
 		.num_line     = 0,
 		.cap_line     = WF3D_INITIAL_LINE_CAP,
 		.lines        = malloc(2 * sizeof(size_t) * WF3D_INITIAL_LINE_CAP),
-		.xfrom_vertex = 0,
+		.num_tri      = 0,
+		.cap_tri      = WF3D_INITIAL_TRI_CAP,
+		.tris         = malloc(3 * sizeof(size_t) * WF3D_INITIAL_TRI_CAP),
 		.num_vertex   = 0,
 		.cap_vertex   = WF3D_INITIAL_VERTEX_CAP,
 		.vertices     = malloc(sizeof(vec3f_t) * WF3D_INITIAL_VERTEX_CAP),
 		.cam_mode     = CAMERA_VERTICAL_FOV,
-		.cam_var      = 30,
+		.cam_var      = 60,
 		.stack        = {
 			.parent = NULL,
 			.value  = matrix_3d_identity(),
@@ -67,6 +69,7 @@ void wf3d_init(wf3d_ctx_t *ctx) {
 // DESTROYs a DRAWING QUEUE.
 void wf3d_destroy(wf3d_ctx_t *ctx) {
 	free(ctx->lines);
+	free(ctx->tris);
 	free(ctx->vertices);
 	wf3d_reset_3d(ctx);
 }
@@ -74,12 +77,29 @@ void wf3d_destroy(wf3d_ctx_t *ctx) {
 // CLEARs the DRAWING QUEUE.
 void wf3d_clear(wf3d_ctx_t *ctx) {
 	ctx->num_line     = 0;
+	ctx->num_tri      = 0;
 	ctx->num_vertex   = 0;
-	ctx->xfrom_vertex = 0;
 	wf3d_reset_3d(ctx);
 }
 
 
+
+static inline depth_t float_to_depth(float in, float max) {
+	return UINT16_MAX * (in / max);
+}
+
+// A DEPTH BUFFER shading device.
+pax_col_t wf3d_shader_cb_depth(pax_col_t tint, pax_col_t existing, int x, int y, float u, float v, void *args) {
+	wf3d_ctx_t *ctx = args;
+	depth_t depth = u;
+	depth_t existing_depth = ctx->depth[x + y*ctx->width];
+	if (depth < existing_depth) {
+		ctx->depth[x + y*ctx->width] = depth;
+		return 0xff000000 | (tint & ctx->mask) | (existing & ~ctx->mask);
+	} else {
+		return existing;
+	}
+}
 
 // An ADDITIVE shading device.
 pax_col_t wf3d_shader_cb_additive(pax_col_t tint, pax_col_t existing, int x, int y, float u, float v, void *args) {
@@ -95,6 +115,21 @@ pax_col_t wf3d_shader_cb_additive(pax_col_t tint, pax_col_t existing, int x, int
 	return pax_col_rgb(r, g, b);
 }
 
+// A MAXIMUM shading device.
+pax_col_t wf3d_shader_cb_maximum(pax_col_t tint, pax_col_t existing, int x, int y, float u, float v, void *args) {
+	uint16_t r0 = (existing >> 16) & 255;
+	uint16_t g0 = (existing >>  8) & 255;
+	uint16_t b0 =  existing        & 255;
+	uint16_t r1 = (tint >> 16) & 255;
+	uint16_t g1 = (tint >>  8) & 255;
+	uint16_t b1 =  tint        & 255;
+	return pax_col_rgb(
+		r0 > r1 ? r0 : r1,
+		g0 > g1 ? g0 : g1,
+		b0 > b1 ? b0 : b1
+	);
+}
+
 const pax_shader_t wf3d_shader_additive = {
 	.schema_version    =  1,
 	.schema_complement = ~1,
@@ -106,15 +141,43 @@ const pax_shader_t wf3d_shader_additive = {
 	.alpha_promise_255 = true,
 };
 
+const pax_shader_t wf3d_shader_maximum = {
+	.schema_version    =  1,
+	.schema_complement = ~1,
+	.renderer_id       = PAX_RENDERER_ID_SWR,
+	.promise_callback  = NULL,
+	.callback          = wf3d_shader_cb_maximum,
+	.callback_args     = NULL,
+	.alpha_promise_0   = true,
+	.alpha_promise_255 = true,
+};
+
 // Adds a line to the DRAWING QUEUE.
 void wf3d_line(wf3d_ctx_t *ctx, vec3f_t start, vec3f_t end) {
-	vec3f_t verts[]   = {start, end};
-	size_t  indices[] = {0, 1};
-	wf3d_lines(ctx, 2, verts, 1, indices);
+	vec3f_t verts[]        = {start, end};
+	size_t  line_indices[] = {0, 1};
+	wf3d_add(ctx, 2, verts, 1, line_indices, 0, NULL);
 }
 
 // Adds multiple LINEs to the DRAWING QUEUE.
-void wf3d_lines(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t num_lines, size_t *indices) {
+void wf3d_lines(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t num_lines, size_t *line_indices) {
+	wf3d_add(ctx, num_vertices, vertices, num_lines, line_indices, 0, NULL);
+}
+
+// Adds a triangle to the DRAWING QUEUE.
+void wf3d_tri(wf3d_ctx_t *ctx, vec3f_t a, vec3f_t b, vec3f_t c) {
+	vec3f_t verts[]       = {a, b, c};
+	size_t  tri_indices[] = {0, 1, 2};
+	wf3d_add(ctx, 2, verts, 0, NULL, 1, tri_indices);
+}
+
+// Adds multiple TRIANGLES to the DRAWING QUEUE.
+void wf3d_tris(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t num_tris, size_t *tri_indices) {
+	wf3d_add(ctx, num_vertices, vertices, 0, NULL, num_tris, tri_indices);
+}
+
+// Adds multiple LINEs and TRIANGLEs to the DRAWING QUEUE.
+void wf3d_add(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t num_lines, size_t *line_indices, size_t num_tris, size_t *tri_indices) {
 	// Ensure array space for VTX.
 	if (ctx->cap_vertex <= ctx->num_vertex + num_vertices) {
 		while (ctx->cap_vertex <= ctx->num_vertex + num_vertices) {
@@ -128,7 +191,15 @@ void wf3d_lines(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t 
 		while (ctx->cap_line <= ctx->num_line + num_lines) {
 			ctx->cap_line = ctx->cap_line * 3 / 2;
 		}
-		ctx->lines = realloc(ctx->lines, 2 * sizeof(vec3f_t) * ctx->cap_line);
+		ctx->lines = realloc(ctx->lines, 2 * sizeof(size_t) * ctx->cap_line);
+	}
+	
+	// Ensure array space for TRI.
+	if (ctx->cap_tri <= ctx->num_tri + num_tris) {
+		while (ctx->cap_tri <= ctx->num_tri + num_tris) {
+			ctx->cap_tri = ctx->cap_tri * 3 / 2;
+		}
+		ctx->tris = realloc(ctx->tris, 3 * sizeof(size_t) * ctx->cap_tri);
 	}
 	
 	// Insert VTX.
@@ -140,32 +211,98 @@ void wf3d_lines(wf3d_ctx_t *ctx, size_t num_vertices, vec3f_t *vertices, size_t 
 	
 	// Insert LINE.
 	for (size_t i = 0; i < num_lines; i++) {
-		ctx->lines[2*(i+ctx->num_line)]   = indices[i*2]   + ctx->num_vertex;
-		ctx->lines[2*(i+ctx->num_line)+1] = indices[i*2+1] + ctx->num_vertex;
+		ctx->lines[2*(i+ctx->num_line)]   = line_indices[i*2]   + ctx->num_vertex;
+		ctx->lines[2*(i+ctx->num_line)+1] = line_indices[i*2+1] + ctx->num_vertex;
+	}
+	
+	// Insert TRI.
+	for (size_t i = 0; i < num_tris; i++) {
+		ctx->tris[3*(i+ctx->num_tri)]   = tri_indices[i*3]   + ctx->num_vertex;
+		ctx->tris[3*(i+ctx->num_tri)+1] = tri_indices[i*3+1] + ctx->num_vertex;
+		ctx->tris[3*(i+ctx->num_tri)+2] = tri_indices[i*3+2] + ctx->num_vertex;
 	}
 	
 	ctx->num_vertex += num_vertices;
-	ctx->num_line += num_lines;
+	ctx->num_line   += num_lines;
+	ctx->num_tri    += num_tris;
+}
+
+// Adds a SHAPE to the DRAWING QUEUE.
+void wf3d_mesh(wf3d_ctx_t *ctx, wf3d_shape_t *shape) {
+	if (shape->num_tri)
+		wf3d_tris(ctx, shape->num_vertex, shape->vertices, shape->num_tri, shape->tri_indices);
+	else
+		wf3d_lines(ctx, shape->num_vertex, shape->vertices, shape->num_lines, shape->line_indices);
 }
 
 // DRAWs everything in the DRAWING QUEUE.
 void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t cam_matrix) {
 	// Get camera information.
 	float focal = wf3d_get_foc(to, ctx);
+	ctx->width  = to->width;
+	ctx->height = to->height;
+	ctx->mask   = color;
+	
+	// Clear depth buffer.
+	memset(ctx->depth, 255, sizeof(depth_t) * ctx->width * ctx->height);
 	
 	// Transform 3D points into 2D.
 	vec3f_t *xform_vtx = malloc(sizeof(vec3f_t) * ctx->num_vertex);
+	vec3f_t *proj_vtx  = malloc(sizeof(vec3f_t) * ctx->num_vertex);
+	float max_depth = 0;
 	for (size_t i = 0; i < ctx->num_vertex; i++) {
 		vec3f_t raw_vtx = ctx->vertices[i];
 		matrix_3d_transform(cam_matrix, &raw_vtx.x, &raw_vtx.y, &raw_vtx.z);
-		xform_vtx[i] = wf3d_xform(ctx, focal, raw_vtx);
+		xform_vtx[i] = raw_vtx;
+		proj_vtx[i] = wf3d_xform(ctx, focal, raw_vtx);
+		if (proj_vtx[i].z > max_depth) max_depth = proj_vtx[i].z;
 	}
 	
 	// Set up PAX transform thingy.
 	pax_push_2d(to);
 	float scale = fminf(to->width, to->height);
 	pax_apply_2d(to, matrix_2d_translate(to->width / 2.0, to->height / 2.0));
-	pax_apply_2d(to, matrix_2d_scale(scale / 2, scale / 2));
+	pax_apply_2d(to, matrix_2d_scale(scale / 2, -scale / 2));
+	
+	const pax_shader_t wf3d_shader_depth = {
+		.schema_version    =  1,
+		.schema_complement = ~1,
+		.renderer_id       = PAX_RENDERER_ID_SWR,
+		.promise_callback  = NULL,
+		.callback          = wf3d_shader_cb_depth,
+		.callback_args     = ctx,
+		.alpha_promise_0   = true,
+		.alpha_promise_255 = true,
+	};
+	
+	// Draw tris.
+	for (size_t i = 0; i < ctx->num_tri; i++) {
+		size_t idx0 = ctx->tris[3*i];
+		size_t idx1 = ctx->tris[3*i+1];
+		size_t idx2 = ctx->tris[3*i+2];
+		if (idx0 >= ctx->num_vertex || idx2 >= ctx->num_vertex || idx2 >= ctx->num_vertex) continue;
+		
+		// Compute normals.
+		vec3f_t normals = wf3d_calc_tri_normals(xform_vtx[idx0], xform_vtx[idx1], xform_vtx[idx2]);
+		
+		if (normals.z <= 0 && proj_vtx[idx0].z >= 0 && proj_vtx[idx1].z >= 0 && proj_vtx[idx2].z >= 0) {
+			// float avg_depth = (proj_vtx[idx0].z + proj_vtx[idx1].z + proj_vtx[idx2].z) / 3;
+			// uint8_t part = 255 - 200 * (avg_depth / max_depth);
+			uint8_t part = 255 - (normals.z + 1) / 2 * 200;
+			pax_tri_t depths = {
+				.x0 = float_to_depth(proj_vtx[idx0].z, max_depth), .y0 = 0,
+				.x1 = float_to_depth(proj_vtx[idx1].z, max_depth), .y1 = 0,
+				.x2 = float_to_depth(proj_vtx[idx2].z, max_depth), .y2 = 0,
+			};
+			pax_shade_tri(
+				to, pax_col_lerp(part, 0xff000000, color),
+				&wf3d_shader_depth, &depths,
+				proj_vtx[idx0].x, proj_vtx[idx0].y,
+				proj_vtx[idx1].x, proj_vtx[idx1].y,
+				proj_vtx[idx2].x, proj_vtx[idx2].y
+			);
+		} 
+	}
 	
 	// Draw lines.
 	for (size_t i = 0; i < ctx->num_line; i++) {
@@ -173,12 +310,14 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 		size_t end_idx   = ctx->lines[2*i + 1];
 		if (start_idx >= ctx->num_vertex || end_idx >= ctx->num_vertex) continue;
 		
-		if (xform_vtx[start_idx].z >= 0 && xform_vtx[end_idx].z >= 0) {
+		if (proj_vtx[start_idx].z >= 0 && proj_vtx[end_idx].z >= 0) {
+			float avg_depth = (proj_vtx[start_idx].z + proj_vtx[end_idx].z) / 2;
+			uint8_t part = 255 - 200 * (avg_depth / max_depth);
 			pax_shade_line(
-				to, color,
-				&wf3d_shader_additive,
-				xform_vtx[start_idx].x, xform_vtx[start_idx].y,
-				xform_vtx[end_idx].x, xform_vtx[end_idx].y
+				to, pax_col_lerp(part, 0xff000000, color),
+				&wf3d_shader_maximum,
+				proj_vtx[start_idx].x, proj_vtx[start_idx].y,
+				proj_vtx[end_idx].x, proj_vtx[end_idx].y
 			);
 		}
 	}
@@ -186,6 +325,7 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 	// Clean up.
 	pax_pop_2d(to);
 	free(xform_vtx);
+	free(proj_vtx);
 }
 
 // DRAWs everything in one color per eye.
@@ -195,6 +335,26 @@ void wf3d_render2(pax_buf_t *to, pax_col_t left_eye, pax_col_t right_eye, wf3d_c
 }
 
 
+
+// Calculates the normals for a 3D triangle.
+vec3f_t wf3d_calc_tri_normals(vec3f_t p0, vec3f_t p1, vec3f_t p2) {
+	vec3f_t a = {p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+	vec3f_t b = {p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+	
+	// Make some normals.
+	vec3f_t normals = {
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x,
+	};
+	
+	// Make the length 1.
+	float mul = 1.0 / sqrtf(normals.x * normals.x + normals.y * normals.y + normals.z * normals.z);
+	normals.x *= mul;
+	normals.y *= mul;
+	normals.z *= mul;
+	return normals;
+}
 
 // Determines the focal depth to use in the given context.
 float wf3d_get_foc(pax_buf_t *buf, wf3d_ctx_t *ctx) {
@@ -274,7 +434,7 @@ wf3d_shape_t *s3d_uv_sphere(vec3f_t position, float radius, int latitude_cuts, i
 	size_t memory      = (size_t) malloc(sizeof(wf3d_shape_t) + vertices_size + lines_size);
 	wf3d_shape_t *shape    = (void *)  memory;
 	vec3f_t      *vertices = (void *) (memory + sizeof(wf3d_shape_t));
-	size_t       *indices  = (void *) (memory + sizeof(wf3d_shape_t) + vertices_size);
+	size_t       *line_indices  = (void *) (memory + sizeof(wf3d_shape_t) + vertices_size);
 	
 	// Generate vertices.
 	vertices[0] = (vec3f_t) {0,  1, 0};
@@ -304,30 +464,32 @@ wf3d_shape_t *s3d_uv_sphere(vec3f_t position, float radius, int latitude_cuts, i
 		cur_mtx = matrix_3d_multiply(cur_mtx, lon_rot_mtx);
 	}
 	
-	// Generate indices.
+	// Generate line_indices.
 	size_t line_lon_offset = 2 + latitude_cuts * 4;
 	for (size_t lon = 0; lon < longitude_cuts; lon++) {
 		size_t line_idx   = line_lon_offset * lon;
 		size_t vertex_idx = 2 + lon * latitude_cuts;
-		indices[line_idx]     = 0;
-		indices[line_idx + 1] = vertex_idx;
-		indices[line_idx + 2] = 1;
-		indices[line_idx + 3] = vertex_idx + latitude_cuts - 1;
-		indices[line_idx + 4] = vertex_idx;
-		indices[line_idx + 5] = 2 + (lon * latitude_cuts + latitude_cuts) % (num_vertex - 2);
+		line_indices[line_idx]     = 0;
+		line_indices[line_idx + 1] = vertex_idx;
+		line_indices[line_idx + 2] = 1;
+		line_indices[line_idx + 3] = vertex_idx + latitude_cuts - 1;
+		line_indices[line_idx + 4] = vertex_idx;
+		line_indices[line_idx + 5] = 2 + (lon * latitude_cuts + latitude_cuts) % (num_vertex - 2);
 		line_idx += 6;
 		for (size_t lat = 0; lat < latitude_cuts - 1; lat++) {
-			indices[line_idx + lat * 4]     = lat + vertex_idx;
-			indices[line_idx + lat * 4 + 1] = lat + vertex_idx + 1;
-			indices[line_idx + lat * 4 + 2] = lat + vertex_idx + 1;
-			indices[line_idx + lat * 4 + 3] = 2 + (lon * latitude_cuts + lat + latitude_cuts + 1) % (num_vertex - 2);
+			line_indices[line_idx + lat * 4]     = lat + vertex_idx;
+			line_indices[line_idx + lat * 4 + 1] = lat + vertex_idx + 1;
+			line_indices[line_idx + lat * 4 + 2] = lat + vertex_idx + 1;
+			line_indices[line_idx + lat * 4 + 3] = 2 + (lon * latitude_cuts + lat + latitude_cuts + 1) % (num_vertex - 2);
 		}
 	}
 	
 	// Fill in the shape.
-	shape->num_vertex = num_vertex;
-	shape->vertices   = vertices;
-	shape->num_lines  = num_line;
-	shape->indices    = indices;
+	shape->num_vertex   = num_vertex;
+	shape->vertices     = vertices;
+	shape->num_lines    = num_line;
+	shape->line_indices = line_indices;
+	shape->num_tri      = 0;
+	shape->tri_indices  = NULL;
 	return shape;
 }

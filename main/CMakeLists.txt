@@ -8,6 +8,6 @@ idf_component_register(
         "main.c"
     INCLUDE_DIRS
         "." "include"
-    EMBED_TXTFILES
+    EMBED_FILES
         "suzanne.obj"
 )
