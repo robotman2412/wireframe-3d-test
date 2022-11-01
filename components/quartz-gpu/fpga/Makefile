@@ -27,7 +27,7 @@ PROJ_BIN_FINAL := $(BUILD_TMP)/$(PROJ_BIN_FINAL)
 all_int: $(PROJ_BIN_FINAL)
 
 # MCH2022 programming
-PROG_SCRIPT ?= ../../tools/webusb_fpga.py
+PROG_SCRIPT ?= ../../../tools/webusb_fpga.py
 PROG_EXTRA ?=
 
 prog-fpga: $(PROJ_BIN_FINAL)
