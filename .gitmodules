@@ -43,3 +43,6 @@
 [submodule "tools"]
 	path = tools
 	url = https://github.com/badgeteam/mch2022-tools
+[submodule "components/quartz-gpu/fpga/no2build"]
+	path = components/quartz-gpu/fpga/no2build
+	url = https://github.com/no2fpga/no2build

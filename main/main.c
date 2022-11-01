@@ -79,9 +79,9 @@ void app_main() {
     
     FILE *fd = fmemopen((void *) suzanne_obj_start, suzanne_obj_end - suzanne_obj_start, "r");
     wf3d_shape_t *suzanne = s3d_decode_obj(fd);
-    wf3d_shape_t *sphere  = s3d_uv_sphere((vec3f_t){0, 0, 0}, 1, 5, 10);
+    wf3d_shape_t *sphere  = s3d_uv_sphere((vec3f_t){0, 0, 0}, 1.5, 5, 10);
     
-    int mode = 1;
+    int mode = 0;
     int scene = 1;
     float eye_dist = 0.18;
     while (1) {
@@ -124,6 +124,7 @@ void app_main() {
         
         // Move around a bit.
         wf3d_apply_3d(&c3d, matrix_3d_translate(0, 0, 2));
+        wf3d_apply_3d(&c3d, matrix_3d_scale(1.2, 1.2, 1.2));
         float a = esp_timer_get_time() % 30000000 / 10000000.0 * 2 * M_PI;
         wf3d_apply_3d(&c3d, matrix_3d_rotate_y(a));
         
@@ -166,9 +167,9 @@ void app_main() {
             // matrix_3d_translate(0, 0, 2);
         
         // Render 3D stuff.
+        if (mode == 0) wf3d_render (&buf, 0xffafafaf, &c3d, cam_mtx); // Regular projected 3D.
         if (mode == 1) wf3d_render2(&buf, 0xffff0000, 0xff00ffff, &c3d, cam_mtx, eye_dist); // Red, Cyan
         if (mode == 2) wf3d_render2(&buf, 0xffffff00, 0xff0000ff, &c3d, cam_mtx, eye_dist); // Yellow, Blue
-        if (mode == 0) wf3d_render(&buf, 0xffffffff, &c3d, cam_mtx); // Regular projected 3D.
         wf3d_clear(&c3d);
         
         // Draws the entire graphics buffer to the screen.

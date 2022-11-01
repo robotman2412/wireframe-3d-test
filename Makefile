@@ -15,6 +15,9 @@ prepare:
 clean:
 	rm -rf "$(BUILDDIR)"
 
+fpga:
+	$(MAKE) -C components/quartz-gpu/fpga
+
 build:
 	source "$(IDF_PATH)/export.sh" && idf.py build
 

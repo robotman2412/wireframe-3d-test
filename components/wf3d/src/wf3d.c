@@ -91,8 +91,14 @@ static inline depth_t float_to_depth(float in, float max) {
 // A DEPTH BUFFER shading device.
 pax_col_t wf3d_shader_cb_depth(pax_col_t tint, pax_col_t existing, int x, int y, float u, float v, void *args) {
 	wf3d_ctx_t *ctx = args;
+	
+	if (x < 0 || x >= ctx->width || y < 0 || y >= ctx->height) {
+		return existing;
+	}
+	
 	depth_t depth = u;
 	depth_t existing_depth = ctx->depth[x + y*ctx->width];
+	
 	if (depth < existing_depth) {
 		ctx->depth[x + y*ctx->width] = depth;
 		return 0xff000000 | (tint & ctx->mask) | (existing & ~ctx->mask);
@@ -241,7 +247,9 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 	float focal = wf3d_get_foc(to, ctx);
 	ctx->width  = to->width;
 	ctx->height = to->height;
-	ctx->mask   = color;
+	ctx->mask   = ((color & 0xff0000) ? 0xff0000 : 0)
+				| ((color & 0x00ff00) ? 0x00ff00 : 0)
+				| ((color & 0x0000ff) ? 0x0000ff : 0);
 	
 	// Clear depth buffer.
 	memset(ctx->depth, 255, sizeof(depth_t) * ctx->width * ctx->height);
@@ -276,11 +284,12 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 	};
 	
 	// Draw tris.
+	matrix_3d_t ligt_mtx = matrix_3d_multiply(matrix_3d_rotate_x(-M_PI / 4), matrix_3d_rotate_y(-M_PI / 2));
 	for (size_t i = 0; i < ctx->num_tri; i++) {
 		size_t idx0 = ctx->tris[3*i];
 		size_t idx1 = ctx->tris[3*i+1];
 		size_t idx2 = ctx->tris[3*i+2];
-		if (idx0 >= ctx->num_vertex || idx2 >= ctx->num_vertex || idx2 >= ctx->num_vertex) continue;
+		if (idx0 >= ctx->num_vertex || idx1 >= ctx->num_vertex || idx2 >= ctx->num_vertex) continue;
 		
 		// Compute normals.
 		vec3f_t normals = wf3d_calc_tri_normals(xform_vtx[idx0], xform_vtx[idx1], xform_vtx[idx2]);
@@ -288,20 +297,23 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 		if (normals.z <= 0 && proj_vtx[idx0].z >= 0 && proj_vtx[idx1].z >= 0 && proj_vtx[idx2].z >= 0) {
 			// float avg_depth = (proj_vtx[idx0].z + proj_vtx[idx1].z + proj_vtx[idx2].z) / 3;
 			// uint8_t part = 255 - 200 * (avg_depth / max_depth);
-			uint8_t part = 255 - (normals.z + 1) / 2 * 200;
+			uint8_t part = 255 - (matrix_3d_transform_inline(ligt_mtx, normals).z + 1) / 2 * 200;
 			pax_tri_t depths = {
 				.x0 = float_to_depth(proj_vtx[idx0].z, max_depth), .y0 = 0,
 				.x1 = float_to_depth(proj_vtx[idx1].z, max_depth), .y1 = 0,
 				.x2 = float_to_depth(proj_vtx[idx2].z, max_depth), .y2 = 0,
 			};
 			pax_shade_tri(
-				to, pax_col_lerp(part, 0xff000000, color),
+				to,
+				// pax_col_rgb(127+normals.x*127, 16, 16),
+				// pax_col_rgb(127+normals.x*32, 127+normals.y*127, 127+normals.z*127),
+				pax_col_lerp(part, 0xff000000, color),
 				&wf3d_shader_depth, &depths,
 				proj_vtx[idx0].x, proj_vtx[idx0].y,
 				proj_vtx[idx1].x, proj_vtx[idx1].y,
 				proj_vtx[idx2].x, proj_vtx[idx2].y
 			);
-		} 
+		}
 	}
 	
 	// Draw lines.
@@ -312,7 +324,7 @@ void wf3d_render(pax_buf_t *to, pax_col_t color, wf3d_ctx_t *ctx, matrix_3d_t ca
 		
 		if (proj_vtx[start_idx].z >= 0 && proj_vtx[end_idx].z >= 0) {
 			float avg_depth = (proj_vtx[start_idx].z + proj_vtx[end_idx].z) / 2;
-			uint8_t part = 255 - 200 * (avg_depth / max_depth);
+			uint8_t part = 255 - 100 * (avg_depth / max_depth);
 			pax_shade_line(
 				to, pax_col_lerp(part, 0xff000000, color),
 				&wf3d_shader_maximum,
@@ -427,20 +439,23 @@ wf3d_shape_t *s3d_uv_sphere(vec3f_t position, float radius, int latitude_cuts, i
 	// Determine line counts.
 	size_t num_vertex = 2 + latitude_cuts * longitude_cuts;
 	size_t num_line   = longitude_cuts * (latitude_cuts * 2 + 1);
+	size_t num_tri    = 2 * latitude_cuts * longitude_cuts;
 	
 	// Allocate memory.
 	size_t vertices_size = num_vertex * sizeof(vec3f_t);
-	size_t lines_size  = num_line * sizeof(size_t) * 2;
-	size_t memory      = (size_t) malloc(sizeof(wf3d_shape_t) + vertices_size + lines_size);
-	wf3d_shape_t *shape    = (void *)  memory;
-	vec3f_t      *vertices = (void *) (memory + sizeof(wf3d_shape_t));
-	size_t       *line_indices  = (void *) (memory + sizeof(wf3d_shape_t) + vertices_size);
+	size_t tris_size     = num_tri * sizeof(size_t) * 3;
+	size_t lines_size    = num_line * sizeof(size_t) * 2;
+	size_t memory        = (size_t) malloc(sizeof(wf3d_shape_t) + vertices_size + tris_size + lines_size);
+	wf3d_shape_t *shape        = (void *)  memory;
+	vec3f_t      *vertices     = (void *) (memory + sizeof(wf3d_shape_t));
+	size_t       *tri_indices  = (void *) (memory + sizeof(wf3d_shape_t) + vertices_size);
+	size_t       *line_indices = (void *) (memory + sizeof(wf3d_shape_t) + vertices_size + tris_size);
 	
 	// Generate vertices.
 	vertices[0] = (vec3f_t) {0,  1, 0};
 	vertices[1] = (vec3f_t) {0, -1, 0};
 	
-	vec3f_t     vtx    = {0, 1, 0};
+	vec3f_t vtx = {0, 1, 0};
 	matrix_3d_t lat_rot_mtx = matrix_3d_rotate_z(M_PI / (latitude_cuts + 1));
 	for (size_t i = 0; i < latitude_cuts; i++) {
 		vtx = matrix_3d_transform_inline(lat_rot_mtx, vtx);
@@ -456,6 +471,8 @@ wf3d_shape_t *s3d_uv_sphere(vec3f_t position, float radius, int latitude_cuts, i
 		0,      radius, 0,      position.y,
 		0,      0,      radius, position.z,
 	}};
+	vertices[0] = matrix_3d_transform_inline(cur_mtx, vertices[0]);
+	vertices[1] = matrix_3d_transform_inline(cur_mtx, vertices[1]);
 	for (size_t i = 0; i < longitude_cuts; i++) {
 		for (size_t x = 0; x < latitude_cuts; x++) {
 			vertices[2 + x + i * latitude_cuts] = matrix_3d_transform_inline(cur_mtx, vertices[2 + x + i * latitude_cuts]);
@@ -484,12 +501,33 @@ wf3d_shape_t *s3d_uv_sphere(vec3f_t position, float radius, int latitude_cuts, i
 		}
 	}
 	
+	// Generate tri_indices.
+	for (size_t lon = 0; lon < longitude_cuts; lon++) {
+		size_t tri_idx    = 6 * latitude_cuts * lon;
+		size_t vertex_idx = 2 + lon * latitude_cuts;
+		tri_indices[tri_idx]     = 0;
+		tri_indices[tri_idx + 1] = 2 + (lon * latitude_cuts + latitude_cuts) % (num_vertex - 2);
+		tri_indices[tri_idx + 2] = vertex_idx;
+		tri_indices[tri_idx + 3] = 1;
+		tri_indices[tri_idx + 4] = 2 + (lon * latitude_cuts + 2 * latitude_cuts - 1) % (num_vertex - 2);
+		tri_indices[tri_idx + 5] = vertex_idx + latitude_cuts - 1;
+		tri_idx += 6;
+		for (size_t lat = 0; lat < latitude_cuts - 1; lat++) {
+			tri_indices[lat*6 + tri_idx]     = lat + vertex_idx;
+			tri_indices[lat*6 + tri_idx + 1] = 2 + (lon * latitude_cuts + lat + latitude_cuts + 1) % (num_vertex - 2);
+			tri_indices[lat*6 + tri_idx + 2] = lat + vertex_idx + 1;
+			tri_indices[lat*6 + tri_idx + 3] = lat + vertex_idx;
+			tri_indices[lat*6 + tri_idx + 4] = 2 + (lon * latitude_cuts + lat + latitude_cuts) % (num_vertex - 2);
+			tri_indices[lat*6 + tri_idx + 5] = 2 + (lon * latitude_cuts + lat + latitude_cuts + 1) % (num_vertex - 2);
+		}
+	}
+	
 	// Fill in the shape.
 	shape->num_vertex   = num_vertex;
 	shape->vertices     = vertices;
 	shape->num_lines    = num_line;
 	shape->line_indices = line_indices;
-	shape->num_tri      = 0;
-	shape->tri_indices  = NULL;
+	shape->num_tri      = num_tri;
+	shape->tri_indices  = tri_indices;
 	return shape;
 }

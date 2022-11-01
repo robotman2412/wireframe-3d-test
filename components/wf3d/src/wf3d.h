@@ -25,6 +25,10 @@
 #ifndef WF3D_H
 #define WF3D_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <pax_gfx.h>
 
 typedef uint16_t depth_t;
@@ -51,10 +55,6 @@ typedef struct {
 
 #include "matrix3.h"
 #include "obj.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 
 
