@@ -25,6 +25,7 @@
 
 #include "main.h"
 #include "wf3d.h"
+#include "quartz.h"
 
 static pax_buf_t buf;
 xQueueHandle buttonQueue;
@@ -64,6 +65,8 @@ void app_main() {
     pax_buf_init(&buf, NULL, 320, 240, PAX_BUF_16_565RGB);
     pax_background(&buf, 0xff000000);
     pax_enable_multicore(1);
+    quartz_init();
+    quartz_debug();
     
     // Initialize NVS.
     nvs_flash_init();

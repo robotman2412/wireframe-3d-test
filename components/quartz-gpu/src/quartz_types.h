@@ -22,30 +22,61 @@
 	SOFTWARE.
 */
 
-#ifndef QUARTZ_H
-#define QUARTZ_H
+#ifndef QUARTZ_TYPES_H
+#define QUARTZ_TYPES_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "quartz_types.h"
-
 #include <pax_gfx.h>
-#include <ice40.h>
-#include <ili9341.h>
 
-// For debugging purposes.
-void quartz_debug();
 
-// Initialise the FPGA GPU system.
-void quartz_init();
 
-// Send a status request.
-quartz_status_t quartz_cmd_status();
+// The GPU is currently working on tasks.
+#define QUARTZ_STATUS_WORKING	0x0001
+// The GPU is in custody of the screen.
+#define QUARTZ_STATUS_SCREEN	0x0002
+// The GPU is ready to accept more tasks
+#define QUARTZ_STATUS_ACCEPTING	0x0004
+// This is the first status request since GPU startup.
+#define QUARTZ_STATUS_HELLO     0x0008
+
+// A previous command was received incorrectly.
+#define QUARTZ_STATUS_ERR_RX	0x0100
+
+
+
+// A command that can be issued.
+typedef enum {
+	// Does nothing.
+	QUARTZ_CMD_NOP    = 0,
+	// Get version and status.
+	// none -> quartz_status_t
+	QUARTZ_CMD_STATUS = 0x01,
+} quartz_cmd_t;
+
+
+
+// Response from a status request.
+typedef struct {
+	// Whether the data was received correctly.
+	bool     rx_valid;
+	
+	// Architecture ID.
+	uint8_t  arch_no;
+	// Revision number.
+	uint8_t  rev_no;
+	// Remaining capacity for additional tasks.
+	uint16_t task_cap;
+	// Status flags bitfield.
+	uint16_t status_flags;
+} quartz_status_t;
+
+
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // QUARTZ_H
+#endif // QUARTZ_TYPES_H
