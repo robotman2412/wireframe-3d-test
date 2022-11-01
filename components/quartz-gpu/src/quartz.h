@@ -41,6 +41,12 @@ void quartz_debug();
 // Initialise the FPGA GPU system.
 void quartz_init();
 
+// Compute the quartz checksum over a number of bytes.
+uint8_t quartz_checksum(const void *mem, size_t length);
+// Send a raw quartz command.
+// Returns whether the message was successfully received.
+bool    quartz_cmd_raw (quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t recv, void *recv_buf);
+
 // Send a status request.
 quartz_status_t quartz_cmd_status();
 

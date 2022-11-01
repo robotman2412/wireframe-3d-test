@@ -27,6 +27,7 @@
 #include <hardware.h>
 #include <pax_internal.h>
 #include <driver/gpio.h>
+#include <string.h>
 
 static const char *TAG = "quartz";
 
@@ -54,12 +55,16 @@ void quartz_init() {
 	if (get_ice40() == NULL) {
 		esp_err_t res = bsp_ice40_init();
 		if (res) {
-			ESP_LOGE(TAG, "GPU init failure (BSP)");
+			ESP_LOGE(TAG, "GPU init failure (BSP: %s)", esp_err_to_name(res));
 		}
 	}
 	
 	// Load the bitstream into the ICE40.
-	ice40_load_bitstream(get_ice40(), quartz_bin_start, quartz_bin_end - quartz_bin_start);
+	esp_err_t res = ice40_load_bitstream(get_ice40(), quartz_bin_start, quartz_bin_end - quartz_bin_start);
+	if (res) {
+		ESP_LOGE(TAG, "GPU init failure (bitstream: %s)", esp_err_to_name(res));
+	}
+	
 	// Give it a bit of time to start up.
 	vTaskDelay(pdMS_TO_TICKS(5));
 	
@@ -97,24 +102,70 @@ void quartz_select(bool select_fpga_output) {
 
 
 
-quartz_status_t quartz_cmd_status() {
-	uint8_t tx[3 + 6] = {
-		// Send status, 0 tx bytes, 6 rx bytes
-		QUARTZ_CMD_STATUS, 0, 6
-	};
-	uint8_t rx[3 + 6];
-	esp_err_t res = ice40_transaction(get_ice40(), tx, sizeof(tx), rx, sizeof(rx));
-	dump_bytes(rx, sizeof(rx));
+// Compute the quartz checksum over a number of bytes.
+uint8_t quartz_checksum(const void *mem, size_t length) {
+	const uint8_t *arr = mem;
+	uint8_t current = 0xcc;
+	for (size_t i = 0; i < length; i++) {
+		current = current ^ arr[i];
+	}
+	return current;
+}
+
+// Send a raw quartz command.
+// Returns whether the message was successfully received.
+bool quartz_cmd_raw(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t recv, void *recv_buf) {
+	// Some temporary buffers for sending and receiving.
+	static uint8_t tx_buf[515];
+	static uint8_t rx_buf[515];
+	
+	// Prepare send headers.
+	tx_buf[0] = opcode;
+	tx_buf[1] = send;
+	tx_buf[2] = recv;
+	// Insert send data.
+	memcpy(&tx_buf[3], send_buf, send);
+	memset(&tx_buf[3+send], 0, sizeof(tx_buf) - 3 - send);
+	
+	// Perform raw SPI transaction.
+	esp_err_t res = ice40_transaction(get_ice40(), tx_buf, 4+send+recv, rx_buf, 4+send+recv);
 	if (res) {
+		ESP_LOGE(TAG, "Comms error: %s", esp_err_to_name(res));
+		return false;
+	}
+	dump_bytes(rx_buf, 4+send+recv);
+	
+	// Calculate checksum over received.
+	uint8_t real_sum = quartz_checksum(&rx_buf[3+send], recv);
+	
+	// Confirm checksum.
+	if (real_sum != rx_buf[3+send+recv]) {
+		// Checksum mismatch.
+		ESP_LOGE(TAG, "Comms error: Checksum mismatch (host's sum: %02x, GPU's sum: %02x)", real_sum, rx_buf[3+send+recv]);
+		return false;
+		
+	} else {
+		// Successfull communication.
+		memcpy(recv_buf, &rx_buf[3+send], recv);
+		return true;
+	}
+}
+
+
+
+// Send a status request.
+quartz_status_t quartz_cmd_status() {
+	uint8_t rx[6];
+	if (!quartz_cmd_raw(QUARTZ_CMD_STATUS, 0, NULL, sizeof(rx), rx)) {
 		return (quartz_status_t) {false};
 	} else {
 		return (quartz_status_t) {
 			.rx_valid     = true,
 			
-			.arch_no      = rx[3 + 0],
-			.rev_no       = rx[3 + 1],
-			.task_cap     = rx[3 + 2] | (rx[3 + 3] << 8),
-			.status_flags = rx[3 + 4] | (rx[3 + 5] << 8),
+			.arch_no      = rx[0],
+			.rev_no       = rx[1],
+			.task_cap     = rx[2] | (rx[3] << 8),
+			.status_flags = rx[4] | (rx[5] << 8),
 		};
 	}
 }
