@@ -40,12 +40,29 @@ void dump_bytes(const void *raw, size_t size) {
 	for (size_t i = 0; i < size; i++) {
 		printf("%02x ", data[i]);
 	}
-	printf("\n");
 }
 
 // For debugging purposes.
 void quartz_debug() {
+    ESP_LOGI(TAG, "Press A to test FPGA.");
 	
+	while (true) {
+		quartz_init();
+		quartz_select(true);
+		gpio_set_direction(GPIO_LCD_RESET, false);
+		vTaskDelay(pdMS_TO_TICKS(100));
+		gpio_set_direction(GPIO_LCD_RESET, true);
+		
+		while (true) {
+			rp2040_input_message_t msg;
+			xQueueReceive(get_rp2040()->queue, &msg, portMAX_DELAY);
+			if (msg.input == RP2040_INPUT_BUTTON_ACCEPT && msg.state) {
+				break;
+			} else if (msg.input == RP2040_INPUT_BUTTON_HOME && msg.state) {
+				return;
+			}
+		}
+	}
 }
 
 
@@ -66,7 +83,7 @@ void quartz_init() {
 	}
 	
 	// Give it a bit of time to start up.
-	vTaskDelay(pdMS_TO_TICKS(5));
+	vTaskDelay(pdMS_TO_TICKS(500));
 	
 	// Initial status check.
 	quartz_status_t status = quartz_cmd_status();
@@ -102,6 +119,22 @@ void quartz_select(bool select_fpga_output) {
 
 
 
+// Wait for the FPGA DEVICE to have INCOMING DATA.
+// Wait time in milliseconds.
+bool quartz_await(uint64_t wait_time) {
+	if (!gpio_get_level(GPIO_INT_FPGA)) return true;
+	
+	if (wait_time) {
+		uint64_t limit = esp_timer_get_time() + wait_time * 1000;
+		while (esp_timer_get_time() < limit) {
+			vTaskDelay(1);
+			if (!gpio_get_level(GPIO_INT_FPGA)) return true;
+		}
+	}
+	
+	return false;
+}
+
 // Compute the quartz checksum over a number of bytes.
 uint8_t quartz_checksum(const void *mem, size_t length) {
 	const uint8_t *arr = mem;
@@ -114,7 +147,7 @@ uint8_t quartz_checksum(const void *mem, size_t length) {
 
 // Send a raw quartz command.
 // Returns whether the message was successfully received.
-bool quartz_cmd_raw(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t recv, void *recv_buf) {
+bool quartz_cmd_raw1(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t recv, void *recv_buf) {
 	// Some temporary buffers for sending and receiving.
 	static uint8_t tx_buf[515];
 	static uint8_t rx_buf[515];
@@ -151,6 +184,69 @@ bool quartz_cmd_raw(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t r
 	}
 }
 
+// Send a raw quartz command.
+// Returns whether the message was successfully received.
+bool quartz_cmd_raw(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t recv, void *recv_buf) {
+	// Some temporary buffers for sending and receiving.
+	static uint8_t tx_buf[260];
+	static uint8_t rx_buf[260];
+	
+	// Prepare send headers.
+	tx_buf[0] = opcode;
+	tx_buf[1] = send;
+	tx_buf[2] = recv;
+	// Insert send data.
+	memcpy(&tx_buf[3], send_buf, send);
+	
+	// Send stuff to the FPGA.
+	esp_err_t res = ice40_transaction(get_ice40(), tx_buf, 3+send, rx_buf, 3+send);
+	if (res) {
+		ESP_LOGE(TAG, "Comms error: %s", esp_err_to_name(res));
+		return false;
+	}
+	printf("\033[32m");
+	dump_bytes(tx_buf, 3+send);
+	printf("-> ");
+	
+	// Await receivement time.
+	if (!quartz_await(100)) {
+		printf("\033[31m<timeout>\033[0m\n");
+		ESP_LOGE(TAG, "Comms error: Timeout waiting for response.");
+		return false;
+	}
+	
+	// Clear out send data.
+	memset(tx_buf, 0, recv+2);
+	res = ice40_transaction(get_ice40(), tx_buf, recv+2, rx_buf, recv+2);
+	if (res) {
+		printf("\033[31m<SPI error>\033[0m\n");
+		ESP_LOGE(TAG, "Comms error: %s", esp_err_to_name(res));
+		return false;
+	}
+	
+	// Calculate checksum over received.
+	uint8_t real_sum = quartz_checksum(rx_buf, 1+recv);
+	if (real_sum != rx_buf[1+recv]) {
+		printf("\033[31m");
+	}
+	dump_bytes(rx_buf, 2+recv);
+	if (real_sum != rx_buf[1+recv]) {
+		printf("(checksum error)");
+	}
+	printf("\033[0m\n");
+	
+	// Confirm checksum.
+	if (real_sum != rx_buf[1+recv]) {
+		// Checksum mismatch.
+		ESP_LOGE(TAG, "Comms error: Checksum mismatch (host's sum: %02x, GPU's sum: %02x)", real_sum, rx_buf[1+recv]);
+		return false;
+		
+	} else {
+		// Successfull communication.
+		memcpy(recv_buf, &rx_buf[1], recv);
+		return true;
+	}
+}
 
 
 // Send a status request.

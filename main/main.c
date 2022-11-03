@@ -31,7 +31,7 @@ static pax_buf_t buf;
 xQueueHandle buttonQueue;
 
 #include <esp_log.h>
-static const char *TAG = "mch2022-demo-app";
+static const char *TAG = "main";
 
 extern const char suzanne_obj_start[] asm("_binary_suzanne_obj_start");
 extern const char suzanne_obj_end[]   asm("_binary_suzanne_obj_end");
@@ -49,8 +49,8 @@ void exit_to_launcher() {
 
 void app_main() {
   
-    
-    ESP_LOGI(TAG, "Welcome to the template app!");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "Starting...");
 
     // Initialize the screen, the I2C and the SPI busses.
     bsp_init();
@@ -65,8 +65,9 @@ void app_main() {
     pax_buf_init(&buf, NULL, 320, 240, PAX_BUF_16_565RGB);
     pax_background(&buf, 0xff000000);
     pax_enable_multicore(1);
-    quartz_init();
+    // quartz_init();
     quartz_debug();
+    exit_to_launcher();
     
     // Initialize NVS.
     nvs_flash_init();

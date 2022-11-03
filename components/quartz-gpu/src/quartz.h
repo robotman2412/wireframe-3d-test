@@ -40,7 +40,12 @@ void quartz_debug();
 
 // Initialise the FPGA GPU system.
 void quartz_init();
+// Select the FPGA's output.
+void quartz_select(bool select_fpga_output);
 
+// Wait for the FPGA DEVICE to have INCOMING DATA.
+// Wait time in milliseconds.
+bool    quartz_await   (uint64_t wait_time);
 // Compute the quartz checksum over a number of bytes.
 uint8_t quartz_checksum(const void *mem, size_t length);
 // Send a raw quartz command.
