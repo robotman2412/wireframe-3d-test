@@ -5,7 +5,7 @@ PROJ := quartz
 PROJ_DEPS :=
 PROJ_RTL_SRCS := $(addprefix rtl/, \
 )
-PROJ_TOP_SRC := src/top_dummy.v
+PROJ_TOP_SRC := src/top.v
 PROJ_TOP_MOD := top
 
 # Target config
