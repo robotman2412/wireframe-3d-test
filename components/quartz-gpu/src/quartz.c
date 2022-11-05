@@ -44,7 +44,8 @@ void dump_bytes(const void *raw, size_t size) {
 
 // For debugging purposes.
 void quartz_debug() {
-    ESP_LOGI(TAG, "Press A to test FPGA.");
+    ESP_LOGI(TAG, "Press A to restart FPGA,");
+    ESP_LOGI(TAG, "Press B to get status.");
 	
 	while (true) {
 		quartz_init();
@@ -58,6 +59,16 @@ void quartz_debug() {
 			xQueueReceive(get_rp2040()->queue, &msg, portMAX_DELAY);
 			if (msg.input == RP2040_INPUT_BUTTON_ACCEPT && msg.state) {
 				break;
+			} else if (msg.input == RP2040_INPUT_BUTTON_BACK && msg.state) {
+				quartz_status_t status = quartz_cmd_status();
+				if (status.rx_valid) {
+					ESP_LOGI(TAG, "Status report:");
+					ESP_LOGI(TAG, "Arch:     %u Rev %u", status.arch_no, status.rev_no);
+					ESP_LOGI(TAG, "Task cap: %u",        status.task_cap);
+					ESP_LOGI(TAG, "Task num: %u",        status.task_num);
+					ESP_LOGI(TAG, "Status:   %04x",      status.status_flags);
+				}
+				
 			} else if (msg.input == RP2040_INPUT_BUTTON_HOME && msg.state) {
 				return;
 			}
@@ -87,33 +98,50 @@ void quartz_init() {
 	
 	// Initial status check.
 	quartz_status_t status = quartz_cmd_status();
-	if (!status.rx_valid || !(status.status_flags & QUARTZ_STATUS_HELLO)) {
+	if (status.status_flags & QUARTZ_ERROR_MASK) {
 		// Error in initialisation, disable FPGA.
 		ice40_disable(get_ice40());
-		ESP_LOGE(TAG, "GPU init failure (quartz)");
+		ESP_LOGE(TAG, "GPU init failure (error code %04x)", status.status_flags);
+		
+	} else if (~status.status_flags & QUARTZ_STATUS_HELLO) {
+		// Error in initialisation, disable FPGA.
+		ice40_disable(get_ice40());
+		ESP_LOGE(TAG, "GPU init failure (handshake failure)");
+		
+	} else if (!status.rx_valid) {
+		// Error in initialisation, disable FPGA.
+		ice40_disable(get_ice40());
+		ESP_LOGE(TAG, "GPU init failure (checksum error)");
 		
 	} else {
 		// Successful startup.
 		ESP_LOGI(TAG, "GPU init success");
-	}
-	
-	if (status.rx_valid) {
 		ESP_LOGI(TAG, "Arch:     %u Rev %u", status.arch_no, status.rev_no);
-		ESP_LOGI(TAG, "Task cap: %u", status.task_cap);
-		ESP_LOGI(TAG, "Status:   %04x", status.status_flags);
+		ESP_LOGI(TAG, "Task cap: %u",        status.task_cap);
+		ESP_LOGI(TAG, "Task num: %u",        status.task_num);
+		ESP_LOGI(TAG, "Status:   %04x",      status.status_flags);
 	}
 }
 
 // Select the FPGA's output.
 void quartz_select(bool select_fpga_output) {
-	gpio_set_direction(GPIO_LCD_MODE, select_fpga_output);
+	// Reset LCD.
+	gpio_set_level(GPIO_LCD_RESET, 0);
+	// Set LCD mode.
+	gpio_set_level(GPIO_LCD_MODE, select_fpga_output);
+	vTaskDelay(5);
+	// Release reset line.
+	gpio_set_level(GPIO_LCD_RESET, 1);
+	
 	
 	if (select_fpga_output) {
 		// Message FPGA about screen custody.
+		ESP_LOGI(TAG, "Screen switched to GPU");
 		
 	} else {
 		// Initialise them screens.
 		ili9341_init(get_ili9341());
+		ESP_LOGI(TAG, "Screen switched to host");
 	}
 }
 
@@ -251,7 +279,7 @@ bool quartz_cmd_raw(quartz_cmd_t opcode, uint8_t send, void *send_buf, uint8_t r
 
 // Send a status request.
 quartz_status_t quartz_cmd_status() {
-	uint8_t rx[6];
+	uint8_t rx[8];
 	if (!quartz_cmd_raw(QUARTZ_CMD_STATUS, 0, NULL, sizeof(rx), rx)) {
 		return (quartz_status_t) {false};
 	} else {
@@ -261,7 +289,8 @@ quartz_status_t quartz_cmd_status() {
 			.arch_no      = rx[0],
 			.rev_no       = rx[1],
 			.task_cap     = rx[2] | (rx[3] << 8),
-			.status_flags = rx[4] | (rx[5] << 8),
+			.task_num     = rx[4] | (rx[5] << 8),
+			.status_flags = rx[6] | (rx[7] << 8),
 		};
 	}
 }

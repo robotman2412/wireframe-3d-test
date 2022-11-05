@@ -158,12 +158,17 @@ module ili9341(
 			
 			// Check length.
 			if (init_counter == init_len) begin
-				state    <= state_idle;
+				state    <= state_write;
 			end
 			
 		end else if (state == state_idle) begin
 			// Nothing happens.
 			lcd_we_reg   <= 0;
+			
+		end else if (state == state_write) begin
+			// WRITING NOW!
+			lcd_we_reg   <= 1;
+			lcd_rs_reg   <= 0;
 			
 		end
 	end

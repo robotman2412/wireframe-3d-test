@@ -42,23 +42,29 @@ extern "C" {
 // This is the first status request since GPU startup.
 #define QUARTZ_STATUS_HELLO     0x0008
 
-// A previous command was received incorrectly.
+// A previous command was received incorrectly (invalid checksum or length, etc).
 #define QUARTZ_STATUS_ERR_RX	0x0100
+
+// A mask of all error status flags.
+#define QUARTZ_ERROR_MASK       0xff00
 
 
 
 // A command that can be issued.
 typedef enum {
-	// Does nothing.
+	// Does nothing, and elicits no response.
 	QUARTZ_CMD_NOP    = 0,
 	// Get version and status.
 	// none -> quartz_status_t
 	QUARTZ_CMD_STATUS = 0x01,
+	// Set the color of the RGB LED.
+	// u8 r, u8 g, u8 b -> quartz_status_t
+	QUARTZ_CMD_RGBLED = 0x02,
 } quartz_cmd_t;
 
 
 
-// Response from a status request.
+// Common response data for commands.
 typedef struct {
 	// Whether the data was received correctly.
 	bool     rx_valid;
@@ -67,8 +73,10 @@ typedef struct {
 	uint8_t  arch_no;
 	// Revision number.
 	uint8_t  rev_no;
-	// Remaining capacity for additional tasks.
+	// Total capacity for tasks.
 	uint16_t task_cap;
+	// Amount of tasks in the queue or being worked on.
+	uint16_t task_num;
 	// Status flags bitfield.
 	uint16_t status_flags;
 } quartz_status_t;
