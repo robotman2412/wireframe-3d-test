@@ -66,8 +66,8 @@ void app_main() {
     pax_background(&buf, 0xff000000);
     pax_enable_multicore(1);
     // quartz_init();
-    quartz_debug();
-    exit_to_launcher();
+    // quartz_debug();
+    // exit_to_launcher();
     
     // Initialize NVS.
     nvs_flash_init();
